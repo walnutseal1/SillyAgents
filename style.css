@@ -1,0 +1,100 @@
+/* SillyAgents UI Extension Styles */
+
+#create_subroutine_button {
+    background-color: #4A90E2;
+    color: white;
+}
+
+#create_subroutine_button:hover {
+    background-color: #357ABD;
+}
+
+#manage_skills_button {
+    background-color: #9B59B6;
+    color: white;
+}
+
+#manage_skills_button:hover {
+    background-color: #8E44AD;
+}
+
+#subroutine_create_dialog,
+#skills_dialog {
+    padding: 15px;
+}
+
+#subroutine_create_dialog h3,
+#skills_dialog h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+}
+
+.skill-item {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background-color: var(--black30a);
+}
+
+.skill-name {
+    font-weight: bold;
+    font-size: 1.1em;
+    margin-bottom: 5px;
+}
+
+.skill-description {
+    color: var(--grey70);
+    margin-bottom: 10px;
+    font-size: 0.9em;
+}
+
+.delete-skill {
+    background-color: #E74C3C;
+    color: white;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.delete-skill:hover {
+    background-color: #C0392B;
+}
+
+#skills_list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 15px;
+}
+
+/* Subroutine-specific chat styling */
+.chat_block.subroutine {
+    border-left: 4px solid var(--subroutine-color, #4A90E2);
+}
+
+.chat_block.subroutine .ch_name {
+    color: var(--subroutine-color, #4A90E2);
+}
+
+/* Settings panel styling */
+#sillyagents_settings {
+    margin-bottom: 15px;
+}
+
+#sillyagents_settings .inline-drawer-content {
+    padding: 10px;
+}
+
+#sillyagents_settings label {
+    display: block;
+    margin-bottom: 10px;
+}
+
+#sillyagents_subroutine_color {
+    width: 100%;
+    height: 40px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 3px;
+    cursor: pointer;
+}
