@@ -1,10 +1,10 @@
 ### Roadmap
 #### Phase 1: Core Functionality 
-- [-] Server plugin structure
-- [-] Subroutine CRUD operations
-- [-] Skill import/management
-- [-] Basic UI extension
-- [-] Settings panel
+- [x] Server plugin structure
+- [x] Subroutine CRUD operations
+- [x] Skill import/management
+- [x] Basic UI extension
+- [x] Settings panel
 #### Phase 2: Triggers & Execution
 - [ ] Time-based trigger implementation
 - [ ] Tool-based trigger with polling
