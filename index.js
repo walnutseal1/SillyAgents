@@ -5,6 +5,9 @@
 
 (function() {
     'use strict';
+
+    // Add hardware, context, and helper macros
+    import './macros.js';
     
     const MODULE_NAME = 'sillyagents';
     const API_BASE = '/api/plugins/sillyagents';
