@@ -1,0 +1,19 @@
+{
+  "display_name": "SillyAgents",
+  "js": "index.js",
+  "css": "style.css",
+  "version": "0.1.0",
+  "author": "walnutseal1",
+  "loading_order": 50,
+  "homePage": "https://github.com/walnutseal1/SillyAgents",
+  "requires": [],
+  "optional": [],
+  "license": "Apache 2.0 License",
+  "dependencies": {},
+  "keywords": [
+    "sillytavern",
+    "plugin",
+    "agents",
+    "automation"
+  ]
+}
