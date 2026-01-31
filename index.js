@@ -26,7 +26,9 @@
         
         // Add UI elements
         await injectUI();
-        
+        // Patch subroutines into chat
+        observeChatList();
+        patchChatList();
         // Register event listeners
         registerEventListeners(context);
         
@@ -158,7 +160,61 @@
         const context = SillyTavern.getContext();
         context.saveSettingsDebounced();
     }
+    /**
+     * Apply subroutine styling + pinning to chat list
+     */
+    function patchChatList() {
+        const chatList = $('#chat_list');
+        if (!chatList.length) return;
     
+        const rows = chatList.children('[data-chat]');
+        const subroutineRows = [];
+        const normalRows = [];
+    
+        rows.each(function () {
+            const row = $(this);
+            const chatName = row.data('chat');
+    
+            // Retrieve chat metadata from SillyTavern context
+            const context = SillyTavern.getContext();
+            const chat = context.chatMetadata?.[chatName];
+    
+            const isSubroutine = chat?.chat_metadata?.subroutine === true;
+    
+            if (isSubroutine) {
+                const color =
+                    chat.chat_metadata?.subroutine_config?.color
+                    || extensionSettings.subroutineColor
+                    || '#6366f1';
+    
+                row
+                    .addClass('sillyagent-subroutine')
+                    .css('border-left', `4px solid ${color}`);
+    
+                subroutineRows.push(row);
+            } else {
+                normalRows.push(row);
+            }
+        });
+    
+        // Reorder: subroutines first, preserving relative order
+        chatList.append([...subroutineRows, ...normalRows]);
+    }
+    
+    function observeChatList() {
+        const chatList = document.getElementById('chat_list');
+        if (!chatList) return;
+    
+        const observer = new MutationObserver(() => {
+            patchChatList();
+        });
+    
+        observer.observe(chatList, {
+            childList: true,
+            subtree: false,
+        });
+    }
+
     /**
      * Register event listeners
      */
