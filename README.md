@@ -348,7 +348,7 @@ We welcome contributions! Please:
 
 ## License
 
-AGPL-3.0 - See LICENSE file for details
+Apache 2.0 License - See LICENSE file for details
 
 ## Support
 
