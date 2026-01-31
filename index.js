@@ -223,29 +223,64 @@
     }
     
     /**
+     * Get current character name from SillyTavern context
+     */
+    function getCurrentCharacterName() {
+        const context = SillyTavern.getContext();
+        const character = context.characters[context.characterId];
+        
+        if (!character) {
+            throw new Error('No character selected. Please select a character first.');
+        }
+        
+        return character.name;
+    }
+    
+    /**
      * Show create subroutine dialog
      */
     async function showCreateSubroutineDialog() {
         const { Popup } = SillyTavern.getContext();
         
+        // Check if a character is selected
+        let characterName;
+        try {
+            characterName = getCurrentCharacterName();
+        } catch (error) {
+            toastr.error(error.message);
+            return;
+        }
+        
         const dialogHtml = `
             <div id="subroutine_create_dialog">
                 <h3>Create New Subroutine</h3>
                 <div class="margin-bot-10px">
-                    <label for="subroutine_name">Name</label>
-                    <input type="text" id="subroutine_name" class="text_pole" placeholder="My Subroutine" />
+                    <label for="subroutine_character">Character</label>
+                    <input type="text" id="subroutine_character" class="text_pole" value="${characterName}" readonly />
+                    <small>Subroutine will be created for the currently selected character</small>
+                </div>
+                <div class="margin-bot-10px">
+                    <label for="subroutine_chat_name">Chat Name</label>
+                    <input type="text" id="subroutine_chat_name" class="text_pole" placeholder="email_checker" />
+                    <small>Name for the subroutine chat file (lowercase, use underscores)</small>
                 </div>
                 <div class="margin-bot-10px">
                     <label for="subroutine_trigger_type">Trigger Type</label>
                     <select id="subroutine_trigger_type" class="text_pole">
-                        <option value="time">Time-based</option>
-                        <option value="tool">Tool-based</option>
-                        <option value="api">API-based</option>
+                        <option value="time-based">Time-based</option>
+                        <option value="tool-based">Tool-based</option>
+                        <option value="api-based">API-based</option>
                     </select>
                 </div>
                 <div id="subroutine_time_config" class="margin-bot-10px">
                     <label for="subroutine_interval">Interval (seconds)</label>
                     <input type="number" id="subroutine_interval" class="text_pole" value="60" min="1" />
+                </div>
+                <div id="subroutine_tool_config" class="margin-bot-10px" style="display: none;">
+                    <label for="subroutine_tool_name">Tool Name</label>
+                    <input type="text" id="subroutine_tool_name" class="text_pole" placeholder="check_email" />
+                    <label for="subroutine_tool_interval">Polling Interval (seconds)</label>
+                    <input type="number" id="subroutine_tool_interval" class="text_pole" value="300" min="1" />
                 </div>
                 <div class="margin-bot-10px">
                     <label for="subroutine_color">Color</label>
@@ -257,21 +292,90 @@
                         <span>Enable Auto-Queue Mode</span>
                     </label>
                 </div>
+                <div class="margin-bot-10px">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="subroutine_use_summary" />
+                        <span>Use Summary for Compression</span>
+                    </label>
+                </div>
+                <div class="margin-bot-10px">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="subroutine_use_lorebooks" checked />
+                        <span>Include Lorebooks</span>
+                    </label>
+                </div>
+                <div class="margin-bot-10px">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="subroutine_use_examples" checked />
+                        <span>Include Example Messages</span>
+                    </label>
+                </div>
             </div>
         `;
+        
+        // Show dialog and wait for user action
+        const dialogElement = $(dialogHtml);
+        $('body').append(dialogElement);
+        
+        // Handle trigger type changes
+        $('#subroutine_trigger_type').on('change', function() {
+            const triggerType = $(this).val();
+            
+            // Show/hide relevant config sections
+            $('#subroutine_time_config').toggle(triggerType === 'time-based');
+            $('#subroutine_tool_config').toggle(triggerType === 'tool-based');
+        });
         
         const confirmed = await Popup.show.confirm('Create Subroutine', dialogHtml);
         
         if (confirmed) {
-            const name = $('#subroutine_name').val();
+            const chatName = $('#subroutine_chat_name').val().trim();
             const triggerType = $('#subroutine_trigger_type').val();
-            const interval = parseInt($('#subroutine_interval').val());
             const color = $('#subroutine_color').val();
             const autoQueue = $('#subroutine_auto_queue').prop('checked');
+            const useSummary = $('#subroutine_use_summary').prop('checked');
+            const useLorebooks = $('#subroutine_use_lorebooks').prop('checked');
+            const useExampleMessages = $('#subroutine_use_examples').prop('checked');
             
-            if (!name) {
-                toastr.error('Please provide a name for the subroutine');
+            if (!chatName) {
+                toastr.error('Please provide a chat name for the subroutine');
                 return;
+            }
+            
+            // Sanitize chat name
+            const sanitizedChatName = chatName.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+            
+            // Build config based on trigger type
+            const config = {
+                color,
+                autoQueue,
+                useSummary,
+                useLorebooks,
+                useExampleMessages,
+            };
+            
+            if (triggerType === 'time-based') {
+                const interval = parseInt($('#subroutine_interval').val());
+                if (!interval || interval < 1) {
+                    toastr.error('Please provide a valid interval (>= 1 second)');
+                    return;
+                }
+                config.interval = interval;
+            } else if (triggerType === 'tool-based') {
+                const toolName = $('#subroutine_tool_name').val().trim();
+                const toolInterval = parseInt($('#subroutine_tool_interval').val());
+                
+                if (!toolName) {
+                    toastr.error('Please provide a tool name for tool-based triggers');
+                    return;
+                }
+                if (!toolInterval || toolInterval < 1) {
+                    toastr.error('Please provide a valid polling interval (>= 1 second)');
+                    return;
+                }
+                
+                config.toolName = toolName;
+                config.interval = toolInterval;
             }
             
             try {
@@ -279,20 +383,17 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        name,
+                        characterName,
+                        chatName: sanitizedChatName,
                         triggerType,
-                        config: {
-                            interval,
-                            color,
-                            autoQueue,
-                        },
+                        config,
                     }),
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    toastr.success(`Subroutine "${name}" created successfully!`);
+                    toastr.success(`Subroutine "${sanitizedChatName}" created for ${characterName}!`);
                     await loadSubroutines();
                 } else {
                     toastr.error(`Failed to create subroutine: ${data.error}`);
@@ -300,6 +401,154 @@
             } catch (error) {
                 console.error('[SillyAgents] Error creating subroutine:', error);
                 toastr.error('Failed to create subroutine');
+            }
+        }
+    }
+    
+    /**
+     * Show subroutines list dialog
+     */
+    async function showSubroutinesListDialog() {
+        const { Popup } = SillyTavern.getContext();
+        
+        await loadSubroutines();
+        
+        const subroutinesListHtml = subroutines.map(sub => `
+            <div class="subroutine-item" style="border-left: 4px solid ${sub.color || '#4A90E2'}; padding: 10px; margin-bottom: 10px;">
+                <div class="subroutine-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${sub.chatName}</strong>
+                        <span style="color: #888;"> (${sub.characterName})</span>
+                    </div>
+                    <div>
+                        <span class="badge">${sub.triggerType}</span>
+                        ${sub.active ? '<span class="badge" style="background: green;">Active</span>' : '<span class="badge" style="background: gray;">Inactive</span>'}
+                    </div>
+                </div>
+                <div class="subroutine-config" style="font-size: 0.9em; color: #666; margin-top: 5px;">
+                    ${sub.interval ? `Interval: ${sub.interval}s` : ''}
+                    ${sub.toolName ? `Tool: ${sub.toolName}` : ''}
+                </div>
+                <div class="subroutine-actions" style="margin-top: 10px;">
+                    <button class="menu_button start-subroutine" data-character="${sub.characterName}" data-chat="${sub.chatName}" ${sub.active ? 'disabled' : ''}>
+                        <i class="fa-solid fa-play"></i> Start
+                    </button>
+                    <button class="menu_button stop-subroutine" data-character="${sub.characterName}" data-chat="${sub.chatName}" ${!sub.active ? 'disabled' : ''}>
+                        <i class="fa-solid fa-stop"></i> Stop
+                    </button>
+                    <button class="menu_button delete-subroutine" data-character="${sub.characterName}" data-chat="${sub.chatName}">
+                        <i class="fa-solid fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        
+        const dialogHtml = `
+            <div id="subroutines_list_dialog">
+                <h3>Manage Subroutines</h3>
+                <div id="subroutines_list">
+                    ${subroutinesListHtml || '<p>No subroutines created yet.</p>'}
+                </div>
+            </div>
+        `;
+        
+        await Popup.show.text('Manage Subroutines', dialogHtml);
+        
+        // Attach event handlers
+        $('.start-subroutine').on('click', async function() {
+            const characterName = $(this).data('character');
+            const chatName = $(this).data('chat');
+            await startSubroutine(characterName, chatName);
+        });
+        
+        $('.stop-subroutine').on('click', async function() {
+            const characterName = $(this).data('character');
+            const chatName = $(this).data('chat');
+            await stopSubroutine(characterName, chatName);
+        });
+        
+        $('.delete-subroutine').on('click', async function() {
+            const characterName = $(this).data('character');
+            const chatName = $(this).data('chat');
+            await deleteSubroutine(characterName, chatName);
+        });
+    }
+    
+    /**
+     * Start a subroutine
+     */
+    async function startSubroutine(characterName, chatName) {
+        try {
+            const response = await fetch(`${API_BASE}/triggers/${characterName}/${chatName}/start`, {
+                method: 'POST',
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                toastr.success(`Subroutine "${chatName}" started!`);
+                await loadSubroutines();
+            } else {
+                toastr.error(`Failed to start subroutine: ${data.error}`);
+            }
+        } catch (error) {
+            console.error('[SillyAgents] Error starting subroutine:', error);
+            toastr.error('Failed to start subroutine');
+        }
+    }
+    
+    /**
+     * Stop a subroutine
+     */
+    async function stopSubroutine(characterName, chatName) {
+        try {
+            const response = await fetch(`${API_BASE}/triggers/${characterName}/${chatName}/stop`, {
+                method: 'POST',
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                toastr.success(`Subroutine "${chatName}" stopped!`);
+                await loadSubroutines();
+            } else {
+                toastr.error(`Failed to stop subroutine: ${data.error}`);
+            }
+        } catch (error) {
+            console.error('[SillyAgents] Error stopping subroutine:', error);
+            toastr.error('Failed to stop subroutine');
+        }
+    }
+    
+    /**
+     * Delete a subroutine
+     */
+    async function deleteSubroutine(characterName, chatName) {
+        const { Popup } = SillyTavern.getContext();
+        
+        const confirmed = await Popup.show.confirm(
+            'Delete Subroutine',
+            `Are you sure you want to delete the subroutine "${chatName}" for ${characterName}?`
+        );
+        
+        if (confirmed) {
+            try {
+                const response = await fetch(`${API_BASE}/subroutines/${characterName}/${chatName}`, {
+                    method: 'DELETE',
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    toastr.success('Subroutine deleted successfully!');
+                    await loadSubroutines();
+                    showSubroutinesListDialog(); // Refresh dialog
+                } else {
+                    toastr.error(`Failed to delete subroutine: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('[SillyAgents] Error deleting subroutine:', error);
+                toastr.error('Failed to delete subroutine');
             }
         }
     }
