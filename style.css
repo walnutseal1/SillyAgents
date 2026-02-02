@@ -1,100 +1,465 @@
-/* SillyAgents UI Extension Styles */
+/* ============================================================
+   SillyAgents — Extension Stylesheet
+   All modules share this single file (panel, chat-list, skills).
+   Scoped under .sa-* class prefixes to avoid ST collisions.
+   ============================================================ */
 
-#create_subroutine_button {
-    background-color: #4A90E2;
-    color: white;
+/* ─── CSS custom properties ─────────────────────────────────── */
+:root {
+    --sa-bg:            #1a1a2e;
+    --sa-bg-elevated:   #16213e;
+    --sa-bg-input:      #0f3460;
+    --sa-text:          #e0e0e0;
+    --sa-text-muted:    #8a8a9a;
+    --sa-accent:        #4a90d9;
+    --sa-accent-hover:  #5da0e9;
+    --sa-danger:        #e74c3c;
+    --sa-danger-hover:  #c0392b;
+    --sa-success:       #2ecc71;
+    --sa-border:        #2a2a4a;
+    --sa-radius:        6px;
+    --sa-panel-width:   320px;
+    --sa-transition:    0.2s ease;
 }
 
-#create_subroutine_button:hover {
-    background-color: #357ABD;
+/* ─── Subroutine side panel ─────────────────────────────────── */
+
+#sa-panel {
+    position:   fixed;
+    top:        var(--topBarBlockSize, 40px);
+    right:      0;
+    width:      var(--sa-panel-width);
+    height:     calc(100dvh - var(--topBarBlockSize, 40px));
+    background: var(--sa-bg);
+    border-left:1px solid var(--sa-border);
+    z-index:    250;
+    display:    flex;
+    flex-direction: column;
+    transform:  translateX(100%);
+    transition: transform var(--sa-transition);
+    overflow:   hidden;
+    box-shadow: -4px 0 16px rgba(0,0,0,0.4);
 }
 
-#manage_skills_button {
-    background-color: #9B59B6;
-    color: white;
+#sa-panel.sa-panel-open {
+    transform: translateX(0);
 }
 
-#manage_skills_button:hover {
-    background-color: #8E44AD;
+/* Narrow #sheld when panel is open so chat isn't covered */
+#sheld.sa-sheld-narrowed {
+    width: calc(100% - var(--sa-panel-width)) !important;
+    transition: width var(--sa-transition);
 }
 
-#subroutine_create_dialog,
-#skills_dialog {
-    padding: 15px;
+/* Panel header */
+.sa-panel-header {
+    display:        flex;
+    align-items:    center;
+    justify-content:space-between;
+    padding:        12px 16px;
+    background:     var(--sa-bg-elevated);
+    border-bottom:  1px solid var(--sa-border);
+    flex-shrink:    0;
 }
 
-#subroutine_create_dialog h3,
-#skills_dialog h3 {
-    margin-top: 0;
-    margin-bottom: 15px;
+.sa-panel-title {
+    color:       var(--sa-text);
+    font-size:   14px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
 }
 
-.skill-item {
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 5px;
-    padding: 10px;
-    margin-bottom: 10px;
-    background-color: var(--black30a);
+.sa-panel-close-btn {
+    background: none;
+    border:     none;
+    color:      var(--sa-text-muted);
+    font-size:  18px;
+    cursor:     pointer;
+    padding:    2px 6px;
+    border-radius: var(--sa-radius);
+    transition: color var(--sa-transition), background var(--sa-transition);
+}
+.sa-panel-close-btn:hover {
+    color:      var(--sa-text);
+    background: var(--sa-border);
 }
 
-.skill-name {
-    font-weight: bold;
-    font-size: 1.1em;
-    margin-bottom: 5px;
-}
-
-.skill-description {
-    color: var(--grey70);
-    margin-bottom: 10px;
-    font-size: 0.9em;
-}
-
-.delete-skill {
-    background-color: #E74C3C;
-    color: white;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-}
-
-.delete-skill:hover {
-    background-color: #C0392B;
-}
-
-#skills_list {
-    max-height: 400px;
+/* Panel body (scrollable) */
+.sa-panel-body {
+    flex:       1;
     overflow-y: auto;
-    margin-top: 15px;
+    padding:    16px;
+    display:    flex;
+    flex-direction: column;
+    gap:        12px;
 }
 
-/* Subroutine-specific chat styling */
-.chat_block.subroutine {
-    border-left: 4px solid var(--subroutine-color, #4A90E2);
+/* Config sections */
+.sa-config-section {
+    display:  flex;
+    flex-direction: column;
+    gap:      4px;
 }
 
-.chat_block.subroutine .ch_name {
-    color: var(--subroutine-color, #4A90E2);
+.sa-label {
+    color:     var(--sa-text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
 }
 
-/* Settings panel styling */
-#sillyagents_settings {
-    margin-bottom: 15px;
+.sa-label-row {
+    flex-direction: row;
+    align-items:    center;
+    gap:            8px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size:      14px;
+    color:          var(--sa-text);
+    cursor:         pointer;
 }
 
-#sillyagents_settings .inline-drawer-content {
-    padding: 10px;
+/* Inputs */
+.sa-input,
+.sa-select,
+.sa-textarea {
+    background:   var(--sa-bg-input);
+    border:       1px solid var(--sa-border);
+    border-radius:var(--sa-radius);
+    color:        var(--sa-text);
+    font-size:    14px;
+    padding:      8px 10px;
+    outline:      none;
+    transition:   border-color var(--sa-transition);
+    width:        100%;
+    box-sizing:   border-box;
+}
+.sa-input:focus,
+.sa-select:focus,
+.sa-textarea:focus {
+    border-color: var(--sa-accent);
+}
+.sa-select {
+    appearance: auto;
+}
+.sa-textarea {
+    resize: vertical;
+    min-height: 60px;
 }
 
-#sillyagents_settings label {
-    display: block;
-    margin-bottom: 10px;
-}
-
-#sillyagents_subroutine_color {
-    width: 100%;
-    height: 40px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 3px;
+/* Checkbox */
+.sa-checkbox {
+    width:  16px;
+    height: 16px;
+    accent-color: var(--sa-accent);
     cursor: pointer;
+}
+
+/* Color input */
+.sa-color-row {
+    flex-direction: row;
+    align-items:    center;
+    gap:            12px;
+}
+.sa-color-input {
+    width:  40px;
+    height: 32px;
+    border: 1px solid var(--sa-border);
+    border-radius: var(--sa-radius);
+    background: none;
+    cursor: pointer;
+    padding: 2px;
+}
+
+/* ─── Top-bar toggle button ─────────────────────────────────── */
+
+.sa-topbar-btn {
+    background: none;
+    border:     none;
+    color:      var(--sa-text-muted);
+    font-size:  18px;
+    cursor:     pointer;
+    padding:    6px 10px;
+    border-radius: var(--sa-radius);
+    display:    flex;
+    align-items:center;
+    transition: color var(--sa-transition), background var(--sa-transition);
+}
+.sa-topbar-btn:hover {
+    color:      var(--sa-text);
+    background: var(--sa-border);
+}
+
+/* ─── Chat list: Create Subroutine button ───────────────────── */
+
+.sa-create-btn {
+    background: var(--sa-bg-elevated);
+    border:     1px solid var(--sa-accent);
+    color:      var(--sa-accent);
+    font-size:  13px;
+    padding:    6px 12px;
+    border-radius: var(--sa-radius);
+    cursor:     pointer;
+    white-space:nowrap;
+    transition: background var(--sa-transition), color var(--sa-transition);
+}
+.sa-create-btn:hover {
+    background: var(--sa-accent);
+    color:      #fff;
+}
+
+/* ─── Chat list: subroutine item decoration ─────────────────── */
+
+.sa-subroutine-item {
+    /* border-left is set inline by JS using the config color */
+    background: rgba(74, 144, 217, 0.06);
+    transition: background var(--sa-transition);
+}
+.sa-subroutine-item:hover {
+    background: rgba(74, 144, 217, 0.12);
+}
+
+/* ─── Skills modal ──────────────────────────────────────────── */
+
+.sa-modal {
+    display:  none;
+    position: fixed;
+    inset:    0;
+    z-index:  500;
+}
+.sa-modal.sa-modal-open {
+    display: flex;
+}
+
+.sa-modal-backdrop {
+    position: absolute;
+    inset:    0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(3px);
+}
+
+.sa-modal-content {
+    position:       relative;
+    z-index:        1;
+    background:     var(--sa-bg);
+    border:         1px solid var(--sa-border);
+    border-radius:  10px;
+    width:          min(560px, 90vw);
+    max-height:     80vh;
+    display:        flex;
+    flex-direction: column;
+    overflow:       hidden;
+    box-shadow:     0 8px 40px rgba(0,0,0,0.5);
+    margin:         auto;   /* centers inside the flex modal */
+}
+
+.sa-modal-header {
+    display:        flex;
+    align-items:    center;
+    justify-content:space-between;
+    padding:        16px 20px;
+    background:     var(--sa-bg-elevated);
+    border-bottom:  1px solid var(--sa-border);
+    flex-shrink:    0;
+}
+
+.sa-modal-title {
+    color:     var(--sa-text);
+    font-size: 16px;
+    margin:    0;
+}
+
+.sa-modal-close-btn {
+    background: none;
+    border:     none;
+    color:      var(--sa-text-muted);
+    font-size:  20px;
+    cursor:     pointer;
+    padding:    2px 6px;
+    border-radius: var(--sa-radius);
+    transition: color var(--sa-transition), background var(--sa-transition);
+}
+.sa-modal-close-btn:hover {
+    color:      var(--sa-text);
+    background: var(--sa-border);
+}
+
+.sa-modal-toolbar {
+    display:  flex;
+    gap:      8px;
+    padding:  12px 20px;
+    border-bottom: 1px solid var(--sa-border);
+    flex-shrink: 0;
+}
+
+/* Hidden file inputs (labels act as buttons) */
+.sa-file-input-hidden {
+    position: absolute;
+    width:    1px;
+    height:   1px;
+    opacity:  0;
+    overflow: hidden;
+}
+
+/* Skills list (scrollable) */
+.sa-skills-list {
+    padding:    16px 20px;
+    overflow-y: auto;
+    flex:       1;
+    display:    flex;
+    flex-direction: column;
+    gap:        12px;
+}
+
+.sa-skills-empty {
+    color:     var(--sa-text-muted);
+    font-size: 14px;
+    text-align:center;
+    padding:   24px 0;
+    margin:    0;
+}
+
+/* ─── Skill cards ───────────────────────────────────────────── */
+
+.sa-skill-card {
+    background:    var(--sa-bg-elevated);
+    border:        1px solid var(--sa-border);
+    border-radius: var(--sa-radius);
+    padding:       14px 16px;
+    display:       flex;
+    flex-direction:column;
+    gap:           8px;
+    transition:    border-color var(--sa-transition);
+}
+.sa-skill-card:hover {
+    border-color: var(--sa-accent);
+}
+
+.sa-skill-card-header {
+    display:        flex;
+    align-items:    center;
+    justify-content:space-between;
+    gap:            8px;
+}
+
+.sa-skill-name {
+    color:     var(--sa-text);
+    font-size: 15px;
+    font-weight:600;
+}
+
+.sa-skill-badge {
+    font-size:     11px;
+    padding:       3px 8px;
+    border-radius: 20px;
+    background:    var(--sa-border);
+    color:         var(--sa-text-muted);
+    white-space:   nowrap;
+}
+.sa-skill-badge.sa-badge-attached {
+    background: rgba(46, 204, 113, 0.2);
+    color:      var(--sa-success);
+}
+
+.sa-skill-description {
+    color:     var(--sa-text-muted);
+    font-size: 13px;
+    margin:    0;
+    line-height:1.4;
+}
+
+.sa-skill-card-actions {
+    display: flex;
+    gap:     6px;
+    flex-wrap: wrap;
+}
+
+/* ─── Generic buttons ───────────────────────────────────────── */
+
+.sa-btn {
+    background:    var(--sa-bg-input);
+    border:        1px solid var(--sa-border);
+    color:         var(--sa-text);
+    font-size:     13px;
+    padding:       7px 14px;
+    border-radius: var(--sa-radius);
+    cursor:        pointer;
+    transition:    background var(--sa-transition), border-color var(--sa-transition), color var(--sa-transition);
+    position:      relative;  /* for file input positioning */
+    display:       inline-flex;
+    align-items:   center;
+}
+.sa-btn:hover {
+    background:   var(--sa-border);
+    border-color: var(--sa-accent);
+}
+
+.sa-btn-sm {
+    font-size: 12px;
+    padding:   4px 10px;
+}
+
+.sa-btn-import {
+    background: var(--sa-bg-elevated);
+    border-color: var(--sa-accent);
+    color:      var(--sa-accent);
+}
+.sa-btn-import:hover {
+    background: var(--sa-accent);
+    color:      #fff;
+}
+
+.sa-btn-attach {
+    border-color: var(--sa-success);
+    color:        var(--sa-success);
+}
+.sa-btn-attach:hover {
+    background: var(--sa-success);
+    color:      #fff;
+}
+
+.sa-btn-detach {
+    border-color: var(--sa-text-muted);
+    color:        var(--sa-text-muted);
+}
+.sa-btn-detach:hover {
+    background: var(--sa-border);
+    color:      var(--sa-text);
+}
+
+.sa-btn-export {
+    border-color: var(--sa-accent);
+    color:        var(--sa-accent);
+}
+.sa-btn-export:hover {
+    background: rgba(74, 144, 217, 0.15);
+}
+
+.sa-btn-delete {
+    border-color: var(--sa-danger);
+    color:        var(--sa-danger);
+}
+.sa-btn-delete:hover {
+    background: var(--sa-danger);
+    color:      #fff;
+}
+
+/* ─── Skills tab icon ───────────────────────────────────────── */
+
+.sa-skills-tab-btn {
+    background: none;
+    border:     none;
+    cursor:     pointer;
+    padding:    6px 8px;
+    border-radius: var(--sa-radius);
+    display:    flex;
+    align-items:center;
+    justify-content:center;
+    transition: background var(--sa-transition);
+}
+.sa-skills-tab-btn:hover {
+    background: var(--sa-border);
+}
+.sa-skills-icon {
+    font-size: 18px;
 }
