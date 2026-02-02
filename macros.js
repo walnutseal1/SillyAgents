@@ -1,17 +1,44 @@
-// macros.js
-// ────────────────────────────────────────────────
-// Shared / utility macros for SillyTavern UI extensions
-// Import this file wherever you need these macros registered
-// Usage: import './macros.js';  (in index.js or other module)
-// ────────────────────────────────────────────────
+/**
+ * SillyAgents — Macro registration.
+ * 
+ * Merges the existing hardware/context macros with new tool-call macro caching.
+ * All macros are registered immediately when this module is imported.
+ * Exported init() sets up event listeners for live updates (lastCapturedCode).
+ */
 
-import { getContext } from '/scripts/extensions.js';
+import { MODULE_NAME, log } from './utils.js';
 
-const context = getContext();
+const context = SillyTavern.getContext();
 
-// ────────────────────────────────────────────────
-// Helper: Get unmasked GPU info via WebGL
-// ────────────────────────────────────────────────
+// ─── runtime cache ───────────────────────────────────────────────────────────
+// Written by the prompt interceptor or event listeners; read by macro callbacks.
+
+let _lastCapturedCode   = '';
+let _cachedToolResults  = {};   // { "toolName": "result string" }
+
+/**
+ * Called by the prompt interceptor to cache a tool result before generation.
+ * @param {string} toolName
+ * @param {string} result
+ */
+export function cacheToolResult(toolName, result) {
+    _cachedToolResults[toolName] = result;
+}
+
+/**
+ * Called by CHARACTER_MESSAGE_RENDERED listener to extract the last code block.
+ * @param {string} messageText
+ */
+export function updateLastCapturedCode(messageText) {
+    const blocks = messageText.match(/```(?:\w*\n)?([\s\S]*?)```/g);
+    if (blocks && blocks.length > 0) {
+        const last = blocks[blocks.length - 1];
+        _lastCapturedCode = last.replace(/^```\w*\n?/, '').replace(/```$/, '');
+    }
+}
+
+// ─── Helper: Get unmasked GPU info via WebGL ─────────────────────────────────
+
 function getGPUInfo() {
     try {
         const canvas = document.createElement('canvas');
@@ -30,71 +57,31 @@ function getGPUInfo() {
     }
 }
 
-// ────────────────────────────────────────────────
-// Hardware macros
-// ────────────────────────────────────────────────
+// ─── Hardware macros ─────────────────────────────────────────────────────────
 
-context.registerMacro('cpu_cores', () => {
-    return navigator.hardwareConcurrency || 'unknown';
+context.registerMacro('CPU', () => {
+    return String(navigator.hardwareConcurrency || 'unknown');
 });
 
-context.registerMacro('ram_gb', () => {
+context.registerMacro('RAM', () => {
     return navigator.deviceMemory 
         ? `${navigator.deviceMemory} GB` 
-        : 'unknown / not supported';
+        : 'unknown';
 });
 
-context.registerMacro('gpu', () => {
+context.registerMacro('GPU', () => {
     return getGPUInfo();
 });
 
-context.registerMacro('vram', async () => {
-    if (!navigator.gpu) return 'WebGPU not supported';
-    try {
-        const adapter = await navigator.gpu.requestAdapter();
-        if (!adapter) return 'No GPU adapter';
-        return 'unknown (no direct API) – adapter limits suggest ' + 
-               (adapter.limits?.maxBufferSize / 1e9 || '?').toFixed(1) + '+ GB possible?';
-    } catch (e) {
-        return `WebGPU error: ${e.message}`;
-    }
+context.registerMacro('VRAM', () => {
+    // VRAM is not directly available in browsers; this is a placeholder.
+    // Could attempt WebGPU adapter limits as a rough estimate, but keeping it simple.
+    return 'unknown (not exposed by browser)';
 });
 
-context.registerMacro('hardware_summary', () => {
-    const cpu = navigator.hardwareConcurrency || '?';
-    const ram = navigator.deviceMemory ? `${navigator.deviceMemory} GB` : '?';
-    const gpu = getGPUInfo();
-    return `CPU: ~${cpu} logical cores | RAM: ~${ram} | GPU: ${gpu}`;
-});
+// ─── Context macros ──────────────────────────────────────────────────────────
 
-// ────────────────────────────────────────────────
-// Chat history macro: last_code_block
-// ────────────────────────────────────────────────
-context.registerMacro('last_code_block', () => {
-    const chat = context.chat || [];
-    if (chat.length === 0) return '(no messages)';
-
-    const codeBlockRegex = /```(?:\w+)?\s*([\s\S]*?)\s*```/g;
-
-    for (let i = chat.length - 1; i >= 0; i--) {
-        const text = chat[i].mes || '';
-        let match;
-        let lastMatch = null;
-        while ((match = codeBlockRegex.exec(text)) !== null) {
-            lastMatch = match;
-        }
-        if (lastMatch) {
-            return lastMatch[1].trim();
-        }
-    }
-
-    return '(no code block found)';
-});
-
-// ────────────────────────────────────────────────
-// Context size macros
-// ────────────────────────────────────────────────
-context.registerMacro('context_left', () => {
+context.registerMacro('contextRemaining', () => {
     const max  = context.maxContext || context.maxContextSize || 4096;
     const used = context.contextSize || 0;
 
@@ -105,29 +92,40 @@ context.registerMacro('context_left', () => {
     const left = Math.max(0, max - used);
     const percent = Math.round((left / max) * 100);
 
-    return `${left} tokens left (~${percent}% free)`;
+    return `${left} tokens (~${percent}% free)`;
 });
 
-context.registerMacro('context_used', () => {
-    return context.contextSize || '(unknown)';
+context.registerMacro('contextUsed', () => {
+    return String(context.contextSize || '(unknown)');
 });
 
-context.registerMacro('context_max', () => {
-    return context.maxContext || context.maxContextSize || '(unknown)';
+context.registerMacro('contextMax', () => {
+    return String(context.maxContext || context.maxContextSize || '(unknown)');
 });
 
-// Optional: colored version (uncomment if desired)
-// context.registerMacro('context_left_colored', () => {
-//     const max  = context.maxContext || 4096;
-//     const used = context.contextSize || 0;
-//     const left = Math.max(0, max - used);
-//     const perc = Math.round((left / max) * 100);
-//
-//     let color = 'green';
-//     if (perc < 30) color = 'orange';
-//     if (perc < 10) color = 'red';
-//
-//     return `<span style="color:${color}">${left}</span> tokens left (${perc}%)`;
-// });
+// ─── Tool call / chat history macros ─────────────────────────────────────────
 
-console.log('[macros.js] All utility macros registered');
+context.registerMacro('lastCapturedCode', () => {
+    return _lastCapturedCode || '(no code block captured)';
+});
+
+// ─── init (called by index.js) ───────────────────────────────────────────────
+
+/**
+ * Set up event listeners for live macro updates.
+ * Macros themselves are already registered above.
+ */
+export async function init() {
+    const { eventSource, event_types } = SillyTavern.getContext();
+
+    // Update lastCapturedCode whenever a new LLM message is rendered.
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId) => {
+        try {
+            const { chat } = SillyTavern.getContext();
+            const msg = chat?.find(m => m.id === messageId) ?? chat?.[chat.length - 1];
+            if (msg?.mes) updateLastCapturedCode(msg.mes);
+        } catch (e) { /* non-fatal */ }
+    });
+
+    log('Macro event listeners attached.');
+}
