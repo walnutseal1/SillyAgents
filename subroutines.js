@@ -16,75 +16,129 @@
  */
 
 import { getSubroutineConfig, isCurrentChatSubroutine, log, logError, logWarn, logDebug } from './utils.js';
+import { generateFromChatId } from './gen.js';
+
+// NOTE: getSubroutineConfig now takes chatId parameter: getSubroutineConfig(chatId)
 
 // ─── state ───────────────────────────────────────────────────────────────────
 
-let _intervalId   = null;   // setInterval handle
-let _isRunning    = false;  // logical flag (mirrors config.running)
-let _isGenerating = false;  // guard: don't overlap generations
+// Map of chatId -> { intervalId, isGenerating }
+const _runningLoops = new Map();
 
 // ─── public API ──────────────────────────────────────────────────────────────
 
 export async function init() {
     const { eventSource, event_types } = SillyTavern.getContext();
 
-    // When the user switches chats, stop any running loop then maybe start a new one.
-    eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-
-    // When generation ends, auto-queue may need to fire.
-    eventSource.on(event_types.GENERATION_ENDED, onGenerationEnded);
-
     // Custom events from sibling modules.
     eventSource.on('sa:config-changed',       onConfigChanged);
     eventSource.on('sa:subroutine-created',   onSubroutineCreated);
 
-    // On first load, if we're already in a subroutine that was running, resume.
+    // On first load, scan all chats and start any running subroutines.
     // (Handles ghost-browser resume via SilentClient.)
-    onChatChanged();
+    await startAllRunningSubroutines();
 
     log('Subroutine runtime ready.');
 }
 
 // ─── loop lifecycle ──────────────────────────────────────────────────────────
 
-/** Start the polling loop for the current chat. No-op if already running. */
-export function startLoop() {
-    const config = getSubroutineConfig();
-    if (!config || _isRunning) return;
+/** Start the polling loop for a specific chatId. No-op if already running. */
+export function startLoop(chatId) {
+    if (!chatId) {
+        logWarn('startLoop called without chatId');
+        return;
+    }
+
+    if (_runningLoops.has(chatId)) {
+        logDebug('Loop already running for', chatId);
+        return;
+    }
+
+    const config = getSubroutineConfig(chatId);
+    if (!config) {
+        logWarn('No subroutine config found for', chatId);
+        return;
+    }
 
     const interval = Math.max(config.intervalSeconds, 5) * 1000; // enforce 5 s minimum
-    _intervalId  = setInterval(onTick, interval);
-    _isRunning   = true;
-    emitLoopState(true);
-    log('Loop started — interval', config.intervalSeconds, 's');
+    const intervalId = setInterval(() => onTick(chatId), interval);
+    
+    _runningLoops.set(chatId, {
+        intervalId,
+        isGenerating: false,
+    });
+
+    emitLoopState(chatId, true);
+    log('Loop started for', chatId, '— interval', config.intervalSeconds, 's');
 }
 
-/** Stop the polling loop. Safe to call when not running. */
-export function stopLoop() {
-    if (_intervalId !== null) {
-        clearInterval(_intervalId);
-        _intervalId = null;
+/** Stop the polling loop for a specific chatId. Safe to call when not running. */
+export function stopLoop(chatId) {
+    if (!chatId) {
+        logWarn('stopLoop called without chatId');
+        return;
     }
-    _isRunning  = false;
-    _isGenerating = false;
-    emitLoopState(false);
-    log('Loop stopped.');
+
+    const loopState = _runningLoops.get(chatId);
+    if (!loopState) {
+        logDebug('No loop running for', chatId);
+        return;
+    }
+
+    clearInterval(loopState.intervalId);
+    _runningLoops.delete(chatId);
+    
+    emitLoopState(chatId, false);
+    log('Loop stopped for', chatId);
 }
 
-/** Restart — used when interval or trigger config changes mid-run. */
-function restartLoop() {
-    const wasRunning = _isRunning;
-    stopLoop();
-    if (wasRunning) startLoop();
+/** Restart a loop — used when interval or trigger config changes mid-run. */
+function restartLoop(chatId) {
+    const wasRunning = _runningLoops.has(chatId);
+    stopLoop(chatId);
+    if (wasRunning) startLoop(chatId);
+}
+
+/** Scan all chats and start loops for any running subroutines. */
+async function startAllRunningSubroutines() {
+    try {
+        // Get list of all chats from SillyTavern
+        const { getChats } = SillyTavern.getContext();
+        const chats = await getChats();
+
+        for (const chat of chats) {
+            const config = getSubroutineConfig(chat.file_name);
+            if (config?.running) {
+                startLoop(chat.file_name);
+            }
+        }
+
+        log('Scanned chats, started', _runningLoops.size, 'subroutine(s)');
+    } catch (e) {
+        logError('Failed to start all running subroutines:', e);
+    }
 }
 
 // ─── tick handler ────────────────────────────────────────────────────────────
 
-async function onTick() {
-    if (_isGenerating) return; // previous generation still in flight
+async function onTick(chatId) {
+    const loopState = _runningLoops.get(chatId);
+    if (!loopState) {
+        logWarn('Tick fired for non-running loop:', chatId);
+        return;
+    }
 
-    const config = getSubroutineConfig();
-    if (!config) { stopLoop(); return; }
+    if (loopState.isGenerating) {
+        logDebug('Skipping tick for', chatId, '— generation in progress');
+        return;
+    }
+
+    const config = getSubroutineConfig(chatId);
+    if (!config) { 
+        stopLoop(chatId); 
+        return; 
+    }
 
     let shouldFire = false;
 
@@ -106,7 +160,7 @@ async function onTick() {
     }
 
     if (shouldFire) {
-        await fireHeartbeat(config);
+        await fireHeartbeat(chatId, config);
     }
 }
 
@@ -178,108 +232,165 @@ async function evaluateApiTrigger(config) {
 
 /**
  * Inject the heartbeat message into the chat and trigger generation.
+ * Now uses generateFromChatId to work with background chats.
+ * Handles tool execution loop and auto-queue inline.
  */
-async function fireHeartbeat(config) {
-    _isGenerating = true;
+async function fireHeartbeat(chatId, config) {
+    const loopState = _runningLoops.get(chatId);
+    if (!loopState) return;
+
+    loopState.isGenerating = true;
     try {
-        const { chat, saveMetadata } = SillyTavern.getContext();
+        // Load the chat data to append heartbeat message
+        const chatData = await loadChatData(chatId);
+        if (!chatData) {
+            logError('Failed to load chat data for', chatId);
+            return;
+        }
 
-        // Build a user-side heartbeat message and push it into the live chat array.
+        // Build heartbeat message
         const heartbeat = {
-            is_user:    true,
-            name:       'User',
-            send_date:  new Date().toLocaleString(),
-            mes:        config.heartbeatMessage || '[heartbeat]',
-            id:         chat.length,
+            is_user: true,
+            name: 'User',
+            send_date: new Date().toISOString(),
+            mes: config.heartbeatMessage || '[heartbeat]',
         };
-        chat.push(heartbeat);
 
-        // Persist so it survives a reload.
-        await saveMetadata();
+        // Append to chat
+        chatData.chat.push(heartbeat);
+        await saveChatData(chatId, chatData);
 
-        // Trigger the normal generation pipeline (uses current character context).
-        const { generateQuietPrompt } = SillyTavern.getContext();
-        await generateQuietPrompt({ quietPrompt: config.heartbeatMessage || '[heartbeat]' });
+        // Generate response using the indirect generation function
+        let result = await generateFromChatId(chatId);
+        
+        // Handle tool calls if present - manual execution loop
+        if (result.tool_calls && result.tool_calls.length > 0) {
+            logDebug('Generated with', result.tool_calls.length, 'tool call(s) for', chatId);
+            
+            // Execute each tool call
+            const ToolManager = SillyTavern.getContext().ToolManager;
+            for (const toolCall of result.tool_calls) {
+                try {
+                    const toolResult = await ToolManager.invokeFunctionTool(
+                        toolCall.function.name,
+                        JSON.parse(toolCall.function.arguments || '{}')
+                    );
+                    
+                    // Append tool result to chat
+                    const toolMessage = {
+                        is_user: false,
+                        name: 'System',
+                        send_date: new Date().toISOString(),
+                        mes: `[Tool: ${toolCall.function.name}]\n${toolResult}`,
+                        extra: { tool_call_id: toolCall.id }
+                    };
+                    chatData.chat.push(toolMessage);
+                    await saveChatData(chatId, chatData);
+                } catch (e) {
+                    logError('Tool execution failed:', toolCall.function.name, e);
+                }
+            }
+            
+            // After tool execution, generate again to get the model's response to tool results
+            result = await generateFromChatId(chatId);
+        }
+        
+        // Auto-queue: check if we should re-prompt
+        if (config.autoQueue) {
+            // If the model didn't call any tools and auto-queue is enabled, re-prompt
+            if (!result.tool_calls || result.tool_calls.length === 0) {
+                logDebug('Auto-queue: no tool calls detected, re-prompting for', chatId);
+                
+                const autoQueueMsg = {
+                    is_user: true,
+                    name: 'User',
+                    send_date: new Date().toISOString(),
+                    mes: config.autoQueuePrompt || 'Continue or call the finish tool if done.',
+                };
+                chatData.chat.push(autoQueueMsg);
+                await saveChatData(chatId, chatData);
+                
+                await generateFromChatId(chatId);
+            }
+        }
 
-        log('Heartbeat fired.');
+        log('Heartbeat fired for', chatId);
     } catch (e) {
-        logError('Heartbeat generation failed:', e);
+        logError('Heartbeat generation failed for', chatId, ':', e);
     } finally {
-        _isGenerating = false;
+        loopState.isGenerating = false;
     }
 }
 
-// ─── auto-queue ──────────────────────────────────────────────────────────────
-
-/**
- * After every generation ends, check whether auto-queue should re-prompt.
- * Auto-queue fires if:
- *   1. We're in a running subroutine with autoQueue enabled.
- *   2. The model's last message did NOT contain a tool call.
- * This keeps the subroutine alive even when models forget to call tools.
- */
-async function onGenerationEnded() {
-    const config = getSubroutineConfig();
-    if (!config || !config.running || !config.autoQueue) return;
-
-    const { chat } = SillyTavern.getContext();
-    const lastMsg  = chat?.[chat.length - 1];
-
-    // Heuristic: if the last message contains a tool_calls block, the model
-    // is doing its job — don't re-prompt.
-    if (lastMsg?.mes && lastMsg.mes.includes('[tool_calls]')) return;
-
-    // Re-prompt with the customisable auto-queue prompt.
-    _isGenerating = true;
+/** Helper to load chat data from file */
+async function loadChatData(chatId) {
     try {
-        const { generateQuietPrompt } = SillyTavern.getContext();
-        await generateQuietPrompt({ quietPrompt: config.autoQueuePrompt });
-        log('Auto-queue re-prompt fired.');
+        const { loadChat } = SillyTavern.getContext();
+        return await loadChat(chatId);
     } catch (e) {
-        logError('Auto-queue re-prompt failed:', e);
-    } finally {
-        _isGenerating = false;
+        logError('Failed to load chat:', chatId, e);
+        return null;
+    }
+}
+
+/** Helper to save chat data to file */
+async function saveChatData(chatId, chatData) {
+    try {
+        const { saveChat } = SillyTavern.getContext();
+        await saveChat(chatId, chatData);
+    } catch (e) {
+        logError('Failed to save chat:', chatId, e);
     }
 }
 
 // ─── event handlers ──────────────────────────────────────────────────────────
 
-function onChatChanged() {
-    // Always stop whatever was running — it belonged to the previous chat.
-    stopLoop();
-
-    // If the new chat is a subroutine that was marked running, resume.
-    const config = getSubroutineConfig();
-    if (config?.running) {
-        startLoop();
+function onConfigChanged(data) {
+    // data should contain chatId
+    const chatId = data?.chatId;
+    if (!chatId) {
+        logWarn('onConfigChanged called without chatId');
+        return;
     }
-}
 
-function onConfigChanged() {
-    const config = getSubroutineConfig();
-    if (!config) { stopLoop(); return; }
+    const config = getSubroutineConfig(chatId);
+    if (!config) { 
+        stopLoop(chatId); 
+        return; 
+    }
 
-    if (config.running && !_isRunning) {
-        startLoop();
-    } else if (!config.running && _isRunning) {
-        stopLoop();
-    } else if (_isRunning) {
+    const isRunning = _runningLoops.has(chatId);
+
+    if (config.running && !isRunning) {
+        startLoop(chatId);
+    } else if (!config.running && isRunning) {
+        stopLoop(chatId);
+    } else if (isRunning) {
         // Still running but something changed (e.g. interval) — restart.
-        restartLoop();
+        restartLoop(chatId);
     }
 }
 
-async function onSubroutineCreated() {
-    // The chat-list module already switched us into the new chat.
-    // Give the CHAT_CHANGED event a tick to fire, then check.
+async function onSubroutineCreated(data) {
+    // data should contain chatId
+    const chatId = data?.chatId;
+    if (!chatId) {
+        logWarn('onSubroutineCreated called without chatId');
+        return;
+    }
+
+    // Give the system a tick to settle
     await new Promise(r => setTimeout(r, 100));
-    const config = getSubroutineConfig();
-    if (config?.running) startLoop();
+    
+    const config = getSubroutineConfig(chatId);
+    if (config?.running) {
+        startLoop(chatId);
+    }
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function emitLoopState(running) {
+function emitLoopState(chatId, running) {
     const { eventSource } = SillyTavern.getContext();
-    eventSource.emit('sa:loop-state', { running });
+    eventSource.emit('sa:loop-state', { chatId, running });
 }
