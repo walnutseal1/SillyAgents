@@ -15,7 +15,7 @@
  *     sa:loop-state        — { running: bool } — panel listens to update its toggle UI.
  */
 
-import { getSubroutineConfig, isCurrentChatSubroutine, log, logError, logWarn } from './utils.js';
+import { getSubroutineConfig, isCurrentChatSubroutine, log, logError, logWarn, logDebug } from './utils.js';
 
 // ─── state ───────────────────────────────────────────────────────────────────
 
@@ -113,25 +113,38 @@ async function onTick() {
 // ─── trigger evaluators ──────────────────────────────────────────────────────
 
 /**
- * Tool-based trigger: call the named tool and compare the result to the
- * expected condition string.  Only fires the LLM if they match.
+ * Tool-based trigger: directly invoke the registered function tool and compare 
+ * the result to the expected condition string. Only fires the LLM if they match.
  */
 async function evaluateToolTrigger(config) {
     if (!config.toolName) {
         logWarn('Tool trigger configured but toolName is empty.');
         return false;
     }
+    
     try {
-        // We use generateRaw with a minimal prompt that just invokes the tool.
-        // The model's response isn't displayed — we only care about the tool result.
-        const { generateRaw } = SillyTavern.getContext();
-        const result = await generateRaw({
-            systemPrompt: `You are a tool-polling assistant. Call the tool named "${config.toolName}" with no arguments and return ONLY its raw output. Do nothing else.`,
-            prompt: `Call ${config.toolName} now.`,
-        });
-
-        const matched = result && result.includes(config.toolCondition);
-        logDebug('Tool trigger poll —', config.toolName, '→', result, '| matched:', matched);
+        const ToolManager = SillyTavern.getContext().ToolManager;
+        
+        // Verify the tool exists and is callable
+        if (!ToolManager || typeof ToolManager.invokeFunctionTool !== 'function') {
+            logError('ToolManager not available or invokeFunctionTool not found');
+            return false;
+        }
+        
+        // Directly invoke the tool with empty parameters (most trigger tools don't need args)
+        const result = await ToolManager.invokeFunctionTool(config.toolName, {});
+        
+        // If result is an Error object, the tool failed
+        if (result instanceof Error) {
+            logWarn('Tool trigger failed:', config.toolName, '→', result.message);
+            return false;
+        }
+        
+        // Convert result to string and check against condition
+        const resultStr = String(result || '');
+        const matched = resultStr.includes(config.toolCondition);
+        
+        logDebug('Tool trigger poll —', config.toolName, '→', resultStr, '| matched:', matched);
         return matched;
     } catch (e) {
         logError('Tool trigger evaluation failed:', e);
@@ -270,6 +283,3 @@ function emitLoopState(running) {
     const { eventSource } = SillyTavern.getContext();
     eventSource.emit('sa:loop-state', { running });
 }
-
-// Import logDebug locally — utils exports it but we alias for clarity here.
-import { logDebug } from './utils.js';
