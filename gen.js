@@ -3,14 +3,30 @@
  * Includes tool definitions so the model can see/use tools, but does NOT
  * automatically execute or loop over tool calls — caller is responsible for that.
  *
+ * Enhanced flexibility:
+ * - Disable prompt parts via flexOptions (e.g., { disableWorldInfo: true, disableExtensions: true, disableExamples: true, disableSystemPrompts: ['nsfw', 'jailbreak'] })
+ * - Specify connectionProfile (string: preset name like 'OpenAI-Default' or API type like 'openai'). Defaults to chat's associated preset if available (from character.data.extensions.preset or similar), else global current.
+ *
  * @param {string} chatId - Filename of the chat (e.g. "Alice - 2025-03-15.json")
- * @param {object} [options] - Optional overrides
- * @param {number} [options.max_tokens] - Override max tokens
- * @param {string} [options.temperature] - Override temperature
+ * @param {object} [options] - Optional generation overrides (e.g., { max_tokens: 400, temperature: 0.85 })
+ * @param {object} [flexOptions] - Flexibility flags for prompt building
+ * @param {boolean} [flexOptions.disableWorldInfo] - Skip world/lorebook injection (default: false)
+ * @param {boolean} [flexOptions.disableExtensions] - Skip extension prompts (default: false)
+ * @param {boolean} [flexOptions.disableExamples] - Skip example messages (default: false)
+ * @param {string[]} [flexOptions.disableSystemPrompts] - Array of system prompt keys to skip (e.g., ['nsfw', 'jailbreak']) (default: [])
+ * @param {string} [connectionProfile] - Preset/API name to use for generation (overrides default)
  * @returns {Promise<object>} Raw generation result (with possible tool_calls)
  */
-async function generateFromChatId(chatId, options = {}) {
+async function generateFromChatId(chatId, options = {}, flexOptions = {}, connectionProfile = null) {
     const context = SillyTavern.getContext();
+
+    // Resolve defaults for flexOptions
+    const {
+        disableWorldInfo = false,
+        disableExtensions = false,
+        disableExamples = false,
+        disableSystemPrompts = [],
+    } = flexOptions;
 
     // ────────────────────────────────────────────────
     // 1. Load the target chat
@@ -33,12 +49,12 @@ async function generateFromChatId(chatId, options = {}) {
     }
 
     // ────────────────────────────────────────────────
-    // 2. Build the full message collection (same pipeline as normal generation)
+    // 2. Build the full message collection (with conditional skips)
     // ────────────────────────────────────────────────
     const messageCollection = new MessageCollection();
 
-    // System prompts
-    const systemKeys = ['main', 'nsfw', 'jailbreak', 'enhanceDefinitions'];
+    // System prompts (conditionally skip specific keys)
+    const systemKeys = ['main', 'nsfw', 'jailbreak', 'enhanceDefinitions'].filter(key => !disableSystemPrompts.includes(key));
     for (const key of systemKeys) {
         let content = chatCompletionDefaultPrompts[key] || '';
         content = substituteParams(content, character);
@@ -48,7 +64,7 @@ async function generateFromChatId(chatId, options = {}) {
         }
     }
 
-    // Character card data
+    // Character card data (always include core char info; could add disableCharData if needed)
     const charBlocks = [
         { key: 'description', value: character.description },
         { key: 'personality', value: character.personality },
@@ -62,15 +78,15 @@ async function generateFromChatId(chatId, options = {}) {
         }
     }
 
-    // Example messages (from character.mes_example)
-    if (character.mes_example?.trim()) {
+    // Example messages (skip if disabled)
+    if (!disableExamples && character.mes_example?.trim()) {
         const examples = parseExampleIntoIndividual(character.mes_example);
         for (const ex of examples) {
             messageCollection.insertAtStart(ex);
         }
     }
 
-    // Chat history — newest messages at the bottom
+    // Chat history — newest messages at the bottom (always include; core to chat)
     for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (!msg.mes?.trim()) continue;
@@ -87,24 +103,28 @@ async function generateFromChatId(chatId, options = {}) {
         }
     }
 
-    // World / lorebook info — temporarily set selected_world_info to character's world
-    const originalWorldInfo = selected_world_info;
-    selected_world_info = character.data?.extensions?.world || '';  // Use character's specific world info if set
-    try {
-        const worldInfo = await getWorldInfoPrompt(messageCollection.getChat(), oai_settings.max_context);
-        if (worldInfo?.before?.content) {
-            messageCollection.add(await Message.fromPromptAsync(worldInfo.before));
+    // World / lorebook info (skip if disabled; use character's specific world)
+    if (!disableWorldInfo) {
+        const originalWorldInfo = selected_world_info;
+        selected_world_info = character.data?.extensions?.world || '';  // Use character's specific world info if set
+        try {
+            const worldInfo = await getWorldInfoPrompt(messageCollection.getChat(), oai_settings.max_context);
+            if (worldInfo?.before?.content) {
+                messageCollection.add(await Message.fromPromptAsync(worldInfo.before));
+            }
+            if (worldInfo?.after?.content) {
+                messageCollection.add(await Message.fromPromptAsync(worldInfo.after));
+            }
+        } finally {
+            selected_world_info = originalWorldInfo;  // Restore original
         }
-        if (worldInfo?.after?.content) {
-            messageCollection.add(await Message.fromPromptAsync(worldInfo.after));
-        }
-    } finally {
-        selected_world_info = originalWorldInfo;  // Restore original
     }
 
-    // Extension injections
-    const extPrompts = getExtensionPrompt('chat', 0);
-    populateInjectionPrompts(extPrompts, messageCollection);
+    // Extension injections (skip if disabled)
+    if (!disableExtensions) {
+        const extPrompts = getExtensionPrompt('chat', 0);
+        populateInjectionPrompts(extPrompts, messageCollection);
+    }
 
     // ────────────────────────────────────────────────
     // 3. Prepare tools (so model can see them)
@@ -133,13 +153,34 @@ async function generateFromChatId(chatId, options = {}) {
     }
 
     // ────────────────────────────────────────────────
-    // 4. Generate (single shot — no tool loop)
+    // 4. Handle connection profile (temporary switch if specified or default from chat/character)
     // ────────────────────────────────────────────────
+    let originalPreset = null;
+    let originalApiType = null;
     try {
+        // Default: Use chat/character's associated preset if available
+        const defaultProfile = connectionProfile || character.data?.extensions?.openai_preset || character.data?.extensions?.preset || null;
+
+        if (defaultProfile) {
+            // Assume preset_manager and api_type are globals; adjust based on exact SillyTavern vars
+            originalPreset = preset_manager;  // Save current preset
+            originalApiType = api_type;      // Save current API type (e.g., 'openai', 'claude')
+
+            // Set to specified/default profile (this assumes profiles are preset names; tweak if needed)
+            preset_manager = defaultProfile;  // Or loadPreset(defaultProfile)
+            if (defaultProfile.startsWith('openai')) api_type = 'openai';  // Example logic; extend for other types
+            // ... add more for claude, horde, etc.
+        }
+
+        // Generate (single shot — no tool loop)
         const result = await context.generateRaw(generationOptions);
         return result;
     } catch (err) {
         console.error("Generation failed:", err);
         throw err;
+    } finally {
+        // Restore originals if changed
+        if (originalPreset !== null) preset_manager = originalPreset;
+        if (originalApiType !== null) api_type = originalApiType;
     }
 }
